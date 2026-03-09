@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 
 from activation_cl_validation.analysis import aggregate_key_metrics, build_tables
-from activation_cl_validation.core import generate_scenarios, simulate_runs, summarize_confidence_intervals
-from activation_cl_validation.plotting import make_validation_figure
+from activation_cl_validation.core import generate_scenarios, paper_case_name, simulate_runs, summarize_confidence_intervals
+from activation_cl_validation.plotting import make_ablation_figure, make_validation_figure
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -37,13 +37,14 @@ def test_validation_metrics_summary_is_derived_from_generated_runs(tmp_path: Pat
 
     outputs = build_tables(df, tmp_path)
     actual = pd.read_csv(outputs.metrics_table)
+    paper_df = df.assign(case_name=df["experiment_id"].map(paper_case_name))
     expected = summarize_confidence_intervals(
-        df,
-        ["experiment_id", "dataset", "method", "drift_delta", "gamma_margin", "switch_period"],
+        paper_df,
+        ["case_name", "dataset", "method", "drift_delta", "gamma_margin", "switch_period"],
         "forgetting_index",
     )
 
-    sort_cols = ["experiment_id", "dataset", "method", "drift_delta", "gamma_margin", "switch_period"]
+    sort_cols = ["case_name", "dataset", "method", "drift_delta", "gamma_margin", "switch_period"]
     pd.testing.assert_frame_equal(
         actual.sort_values(sort_cols).reset_index(drop=True),
         expected.sort_values(sort_cols).reset_index(drop=True),
@@ -64,10 +65,6 @@ def test_aggregate_key_metrics_change_when_seed_schedule_changes() -> None:
     assert any(abs(metrics_a[key] - metrics_b[key]) > 1e-9 for key in metrics_a)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="TODO: export paper-facing case names instead of raw experiment_id values in summary tables.",
-)
 def test_todo_validation_metrics_table_uses_case_names_not_internal_ids(tmp_path: Path) -> None:
     df = _simulation_frame(methods=["Proposed full model", "GELU", "Static GELU", "SELU"])
 
@@ -80,10 +77,6 @@ def test_todo_validation_metrics_table_uses_case_names_not_internal_ids(tmp_path
     assert not any(cell.startswith("exp_") for cell in flattened_cells)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="TODO: replace theorem/check ids with descriptive names in paper tables.",
-)
 def test_todo_theorem_table_uses_descriptive_case_names(tmp_path: Path) -> None:
     df = _simulation_frame(methods=["Proposed full model", "GELU", "Static GELU", "SELU", "ReLU"])
 
@@ -96,10 +89,6 @@ def test_todo_theorem_table_uses_descriptive_case_names(tmp_path: Path) -> None:
     assert not any(cell.startswith(("h1_", "h4_")) for cell in flattened_cells)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="TODO: remove raw artifact file paths from the paper claim traceability table.",
-)
 def test_todo_claim_traceability_omits_file_names_and_paths() -> None:
     claim_table = pd.read_csv(REPO_ROOT / "paper/tables/claim_traceability.csv")
 
@@ -111,7 +100,6 @@ def test_todo_claim_traceability_omits_file_names_and_paths() -> None:
     assert not evidence.str.contains(r"\.(csv|pdf|json)\b", regex=True).any()
 
 
-@pytest.mark.skip(reason="TODO: assert rendered plot decorations no longer overlap after the figure refresh lands.")
 def test_todo_validation_figure_has_no_overlap_between_axes_and_legends(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -126,6 +114,33 @@ def test_todo_validation_figure_has_no_overlap_between_axes_and_legends(
     make_validation_figure(df, pdf_path)
 
     assert closed_figures, "Expected make_validation_figure to close the saved figure."
+    fig = closed_figures[0]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    figure_bbox = fig.bbox
+    for ax in fig.axes:
+        tight_bbox = ax.get_tightbbox(renderer)
+        assert tight_bbox.x0 >= figure_bbox.x0
+        assert tight_bbox.y0 >= figure_bbox.y0
+        assert tight_bbox.x1 <= figure_bbox.x1
+        assert tight_bbox.y1 <= figure_bbox.y1
+
+
+def test_ablation_figure_has_no_overlapping_tick_labels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    closed_figures: list[object] = []
+    monkeypatch.setattr(plt, "close", lambda fig=None: closed_figures.append(fig))
+
+    df = _simulation_frame()
+    pdf_path = tmp_path / "ablation_panels.pdf"
+    make_ablation_figure(df, pdf_path)
+
+    assert closed_figures, "Expected make_ablation_figure to close the saved figure."
     fig = closed_figures[0]
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
