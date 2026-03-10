@@ -326,6 +326,10 @@ class EvaluationLogger(BaseCallback):
         self.eval_episodes = eval_episodes
         self.csv_path = csv_path
         self.rows: List[Dict[str, float | int]] = []
+        self.best_reward = -math.inf
+        self.best_success = -math.inf
+        self.best_reward_path = self.csv_path.parent / "best_reward_model"
+        self.best_success_path = self.csv_path.parent / "best_success_model"
 
     def _write_rows(self) -> None:
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +356,12 @@ class EvaluationLogger(BaseCallback):
             "mean_ep_length": metrics["mean_ep_length"],
         }
         self.rows.append(row)
+        if row["mean_reward"] > self.best_reward:
+            self.best_reward = float(row["mean_reward"])
+            self.model.save(self.best_reward_path)
+        if row["mean_success"] > self.best_success:
+            self.best_success = float(row["mean_success"])
+            self.model.save(self.best_success_path)
         self._write_rows()
 
     def _on_training_start(self) -> None:
@@ -429,6 +439,8 @@ def train_run(
         "final_eval": callback.rows[-1],
         "best_success": max(row["mean_success"] for row in callback.rows),
         "best_reward": max(row["mean_reward"] for row in callback.rows),
+        "best_reward_model": str(callback.best_reward_path.with_suffix(".zip")),
+        "best_success_model": str(callback.best_success_path.with_suffix(".zip")),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return run_dir
@@ -490,7 +502,9 @@ def create_demo_video(
     output_root: Path,
     max_frames: int = 300,
 ) -> Path:
-    model = PPO.load(run_dir / "model.zip", device="cpu")
+    best_reward_model = run_dir / "best_reward_model.zip"
+    model_path = best_reward_model if best_reward_model.exists() else run_dir / "model.zip"
+    model = PPO.load(model_path, device="cpu")
     env = make_base_env(benchmark, seed=12345)
     obs, _ = env.reset()
     frames: List[np.ndarray] = []
@@ -508,7 +522,7 @@ def create_demo_video(
     preview_dir = output_root / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
     video_path = preview_dir / f"{benchmark.name}_proposed_demo.mp4"
-    imageio.mimsave(video_path, frames, fps=20)
+    imageio.mimsave(video_path, frames, fps=20, macro_block_size=1)
     return video_path
 
 
@@ -532,6 +546,11 @@ def write_summary(results: pd.DataFrame, plot_paths: Iterable[Path], video_path:
         .tail(1)
         .reset_index(drop=True)
     )
+    best_rows = (
+        results.groupby(["benchmark", "activation", "seed"], as_index=False)[["mean_reward", "mean_success"]]
+        .max()
+        .reset_index(drop=True)
+    )
     grouped = (
         final_rows.groupby(["benchmark", "activation"], as_index=False)[["mean_reward", "mean_success"]]
         .agg(["mean", "std"])
@@ -541,10 +560,20 @@ def write_summary(results: pd.DataFrame, plot_paths: Iterable[Path], video_path:
         "_".join(str(part) for part in col if part).rstrip("_")
         for col in grouped.columns.to_flat_index()
     ]
+    best_grouped = (
+        best_rows.groupby(["benchmark", "activation"], as_index=False)[["mean_reward", "mean_success"]]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    best_grouped.columns = [
+        "_".join(str(part) for part in col if part).rstrip("_")
+        for col in best_grouped.columns.to_flat_index()
+    ]
     summary = {
         "plots": [str(path) for path in plot_paths],
         "video": str(video_path),
         "final_metrics": grouped.to_dict(orient="records"),
+        "best_metrics": best_grouped.to_dict(orient="records"),
     }
     summary_path = output_root / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
