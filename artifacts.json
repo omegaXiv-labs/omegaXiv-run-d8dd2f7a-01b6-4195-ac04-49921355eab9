@@ -57,11 +57,11 @@
   "publication_preview": {
     "asset": {
       "mimeType": "video/mp4",
-      "path": "experiments/previews/pitfall-default_proposed_demo.mp4"
+      "path": "experiments/previews/hide_and_seek-default_proposed_demo.mp4"
     },
     "caption": "Recovered COOM rollout from the trained proposed-activation agent.",
     "kind": "video",
-    "label": "Pitfall Default Proposed Demo",
+    "label": "Hide and Seek Default Proposed Demo",
     "phase": "validation_simulation",
     "poster": {
       "mimeType": "image/png",
